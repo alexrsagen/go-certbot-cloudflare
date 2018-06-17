@@ -31,7 +31,6 @@ func main() {
 		fmt.Println("[error] Environment variable CERTBOT_DOMAIN not set")
 		return
 	}
-	subdomain := chRecName + "." + domain
 	vt, ok := os.LookupEnv("CERTBOT_VALIDATION")
 	if !ok {
 		fmt.Println("[error] Environment variable CERTBOT_VALIDATION not set")
@@ -44,41 +43,54 @@ func main() {
 	flag.Parse()
 
 	// Get zone information from Cloudflare API
-	if *verbose {
-		fmt.Printf("[info] Looking up zone %s in Cloudflare account\n", domain)
-	}
-	httpRes, err := cfGet(cfAPIEmail, cfAPIKey, "zones", url.Values{
-		"name":     []string{domain},
-		"status":   []string{"active"},
-		"page":     []string{"1"},
-		"per_page": []string{"1"},
-		"match":    []string{"all"},
-	})
-	if err != nil {
-		fmt.Printf("[error] Cloudflare request failed\n%v\n", err)
-		return
-	}
-	var zonesRes cfListZonesResponse
-	d := json.NewDecoder(httpRes.Body)
-	if err = d.Decode(&zonesRes); err != nil {
-		fmt.Printf("[error] Failed to decode Cloudflare response\n%v\n", err)
-		return
-	}
-	if !zonesRes.Success {
-		fmt.Println("[error] Failed to look up zone")
-		for i := range zonesRes.Errors {
-			fmt.Println(zonesRes.Errors[i])
+	zonesRes := &cfListZonesResponse{}
+	zoneDomain := domain
+	for {
+		if *verbose {
+			fmt.Printf("[info] Looking up zone %s in Cloudflare account\n", zoneDomain)
 		}
-		return
-	}
-	if len(zonesRes.Result) == 0 {
-		fmt.Println("[error] Zone not found in Cloudflare account")
-		return
+		httpRes, err := cfGet(cfAPIEmail, cfAPIKey, "zones", url.Values{
+			"name":     []string{zoneDomain},
+			"status":   []string{"active"},
+			"page":     []string{"1"},
+			"per_page": []string{"1"},
+			"match":    []string{"all"},
+		})
+		if err != nil {
+			fmt.Printf("[error] Cloudflare request failed\n%v\n", err)
+			return
+		}
+		d := json.NewDecoder(httpRes.Body)
+		if err = d.Decode(zonesRes); err != nil {
+			fmt.Printf("[error] Failed to decode Cloudflare response\n%v\n", err)
+			return
+		}
+		if !zonesRes.Success {
+			fmt.Println("[error] Failed to look up zone")
+			for i := range zonesRes.Errors {
+				fmt.Println(zonesRes.Errors[i])
+			}
+			return
+		}
+		if len(zonesRes.Result) == 0 {
+			fmt.Println("[error] Zone not found in Cloudflare account")
+			tldPos := strings.LastIndexByte(zoneDomain, '.')
+			sldPos := strings.IndexByte(zoneDomain, '.')
+			if sldPos == tldPos || sldPos == -1 {
+				return
+			}
+			zoneDomain = zoneDomain[sldPos+1:]
+			zonesRes = &cfListZonesResponse{}
+			continue
+		}
+		break
 	}
 	if len(zonesRes.Result[0].Nameservers) < 2 {
 		fmt.Println("[error] Could not find two or more nameservers in zone")
 		return
 	}
+
+	subdomain := chRecName + "." + zoneDomain
 
 	if *cleanup { // Cleanup mode
 		// Get _acme-challenge TXT records from Cloudflare API
@@ -92,9 +104,9 @@ func main() {
 			"per_page": []string{"100"},
 			"match":    []string{"all"},
 		})
-		var recordsRes cfListRecordsResponse
+		recordsRes := &cfListRecordsResponse{}
 		d := json.NewDecoder(httpRes.Body)
-		if err = d.Decode(&recordsRes); err != nil {
+		if err = d.Decode(recordsRes); err != nil {
 			fmt.Printf("[error] Failed to decode Cloudflare response\n%v\n", err)
 			return
 		}
@@ -118,9 +130,9 @@ func main() {
 				fmt.Printf("[error] Cloudflare request failed\n%v\n", err)
 				return
 			}
-			var deleteRes cfDeleteRecordResponse
+			deleteRes := &cfDeleteRecordResponse{}
 			d := json.NewDecoder(httpRes.Body)
-			if err = d.Decode(&deleteRes); err != nil {
+			if err = d.Decode(deleteRes); err != nil {
 				fmt.Printf("[error] Failed to decode Cloudflare response\n%v\n", err)
 				return
 			}
@@ -165,8 +177,7 @@ func main() {
 		if *verbose {
 			fmt.Printf("[info] Attempting initial lookup TXT %s\n", subdomain)
 		}
-		var dnsRes []string
-		dnsRes, err = lookupCompareTXT(rs1, rs2, subdomain)
+		dnsRes, err := lookupCompareTXT(rs1, rs2, subdomain)
 		if err == nil && strSliceLookup(dnsRes, vt) {
 			if *verbose {
 				fmt.Println("[info] Expected challenge record already exists on domain")
@@ -189,9 +200,9 @@ func main() {
 			fmt.Printf("[error] Cloudflare request failed\n%v\n", err)
 			return
 		}
-		var createRes cfCreateRecordResponse
+		createRes := &cfCreateRecordResponse{}
 		d := json.NewDecoder(httpRes.Body)
-		if err = d.Decode(&createRes); err != nil {
+		if err = d.Decode(createRes); err != nil {
 			fmt.Printf("[error] Failed to decode Cloudflare response\n%v\n", err)
 			return
 		}
