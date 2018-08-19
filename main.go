@@ -23,7 +23,12 @@ func main() {
 	verbose := flag.Bool("verbose", false, "Enables verbose output")
 	renewPath := flag.String("renew-path", "/etc/letsencrypt/renewal/", "Let's Encrypt renew folder path")
 	saveRenewCreds := flag.Bool("save-renew-creds", false, "Save Cloudflare credentials to Let's Encrypt renew config?")
+	onlySaveRenewCreds := flag.Bool("only-save-renew-creds", false, "Do nothing other than save Cloudflare credentials to Let's Encrypt renew config?")
 	flag.Parse()
+
+	if *onlySaveRenewCreds {
+		*saveRenewCreds = true
+	}
 
 	// Get environment variables
 	domain, ok := os.LookupEnv("CERTBOT_DOMAIN")
@@ -109,10 +114,13 @@ func main() {
 			return
 		}
 		if len(zonesRes.Result) == 0 {
-			fmt.Println("[error] Zone not found in Cloudflare account")
+			if *verbose {
+				fmt.Printf("[info] Zone \"%s\" not found in Cloudflare account, trying one subdomain less\n", zoneDomain)
+			}
 			tldPos := strings.LastIndexByte(zoneDomain, '.')
 			sldPos := strings.IndexByte(zoneDomain, '.')
 			if sldPos == tldPos || sldPos == -1 {
+				fmt.Println("[error] Zone not found in Cloudflare account")
 				return
 			}
 			zoneDomain = zoneDomain[sldPos+1:]
@@ -185,34 +193,7 @@ func main() {
 				return
 			}
 		}
-
-		// Save Cloudflare credentials to Let's Encrypt renew config
-		if *saveRenewCreds {
-			file, err := ini.Load(renewFilePath)
-			if err != nil {
-				fmt.Printf("[error] Failed to load file \"%s\"\n%v\n", renewFilePath, err)
-				return
-			}
-			file.DeleteSection("go-certbot-cloudflare")
-			section, err := file.NewSection("go-certbot-cloudflare")
-			if err != nil {
-				fmt.Println("[error] Failed to create section \"go-certbot-cloudflare\"")
-				return
-			}
-			if _, err = section.NewKey("cf_api_email", cfAPIEmail); err != nil {
-				fmt.Println("[error] Failed to create key \"cf_api_email\" in section \"go-certbot-cloudflare\"")
-				return
-			}
-			if _, err = section.NewKey("cf_api_key", cfAPIKey); err != nil {
-				fmt.Println("[error] Failed to create key \"cf_api_key\" in section \"go-certbot-cloudflare\"")
-				return
-			}
-			if err = file.SaveTo(renewFilePath); err != nil {
-				fmt.Printf("[error] Failed to save file \"%s\"\n", renewFilePath)
-				return
-			}
-		}
-	} else { // Auth/normal mode
+	} else if !*onlySaveRenewCreds { // Auth/normal mode
 		// Resolve IP of first nameserver
 		addr1, err := net.ResolveUDPAddr("udp", zonesRes.Result[0].Nameservers[0]+":53")
 		if err != nil {
@@ -261,7 +242,7 @@ func main() {
 		}
 		httpRes, err := cfPostJSON(cfAPIEmail, cfAPIKey, "zones/"+zonesRes.Result[0].ID+"/dns_records", &cfCreateDNSRecord{
 			Type:    "TXT",
-			Name:    chRecName,
+			Name:    subdomain,
 			Content: vt,
 		})
 		if err != nil {
@@ -296,7 +277,9 @@ func main() {
 			}
 			dnsRes, err = lookupCompareTXT(rs1, rs2, subdomain)
 			if err == errInconsistent {
-				fmt.Println(err.Error())
+				if *verbose {
+					fmt.Println(err.Error())
+				}
 				time.Sleep(1 * time.Second)
 				continue
 			} else if err != nil && !strings.Contains(err.Error(), "no such host") {
@@ -314,6 +297,33 @@ func main() {
 		}
 		if *verbose {
 			fmt.Printf("[info] Found expected challenge record after %d attempt(s)\n", attempts)
+		}
+	}
+
+	// Save Cloudflare credentials to Let's Encrypt renew config
+	if *saveRenewCreds {
+		file, err := ini.Load(renewFilePath)
+		if err != nil {
+			fmt.Printf("[error] Failed to load file \"%s\"\n%v\n", renewFilePath, err)
+			return
+		}
+		file.DeleteSection("go-certbot-cloudflare")
+		section, err := file.NewSection("go-certbot-cloudflare")
+		if err != nil {
+			fmt.Println("[error] Failed to create section \"go-certbot-cloudflare\"")
+			return
+		}
+		if _, err = section.NewKey("cf_api_email", cfAPIEmail); err != nil {
+			fmt.Println("[error] Failed to create key \"cf_api_email\" in section \"go-certbot-cloudflare\"")
+			return
+		}
+		if _, err = section.NewKey("cf_api_key", cfAPIKey); err != nil {
+			fmt.Println("[error] Failed to create key \"cf_api_key\" in section \"go-certbot-cloudflare\"")
+			return
+		}
+		if err = file.SaveTo(renewFilePath); err != nil {
+			fmt.Printf("[error] Failed to save file \"%s\"\n", renewFilePath)
+			return
 		}
 	}
 }
