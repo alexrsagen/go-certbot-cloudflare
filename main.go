@@ -21,7 +21,7 @@ func main() {
 	// Get command-line flags
 	cleanup := flag.Bool("cleanup", false, "Sets cleanup mode (to be used in --manual-cleanup-hook)")
 	verbose := flag.Bool("verbose", false, "Enables verbose output")
-	renewPath := flag.String("renew-path", "/etc/letsencrypt/renew/", "Let's Encrypt renew folder path")
+	renewPath := flag.String("renew-path", "/etc/letsencrypt/renewal/", "Let's Encrypt renew folder path")
 	saveRenewCreds := flag.Bool("save-renew-creds", false, "Save Cloudflare credentials to Let's Encrypt renew config?")
 	flag.Parse()
 
