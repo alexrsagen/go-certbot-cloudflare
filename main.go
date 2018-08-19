@@ -8,39 +8,75 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path"
 	"strings"
 	"time"
+
+	"github.com/go-ini/ini"
 )
 
 const chRecName = "_acme-challenge"
 
 func main() {
+	// Get command-line flags
+	cleanup := flag.Bool("cleanup", false, "Sets cleanup mode (to be used in --manual-cleanup-hook)")
+	verbose := flag.Bool("verbose", false, "Enables verbose output")
+	renewPath := flag.String("renew-path", "/etc/letsencrypt/renew/", "Let's Encrypt renew folder path")
+	saveRenewCreds := flag.Bool("save-renew-creds", false, "Save Cloudflare credentials to Let's Encrypt renew config?")
+	flag.Parse()
+
 	// Get environment variables
-	cfAPIEmail, ok := os.LookupEnv("CF_API_EMAIL")
-	if !ok {
-		fmt.Println("[error] Environment variable CF_API_EMAIL not set")
-		return
-	}
-	cfAPIKey, ok := os.LookupEnv("CF_API_KEY")
-	if !ok {
-		fmt.Println("[error] Environment variable CF_API_KEY not set")
-		return
-	}
 	domain, ok := os.LookupEnv("CERTBOT_DOMAIN")
 	if !ok {
 		fmt.Println("[error] Environment variable CERTBOT_DOMAIN not set")
 		return
 	}
+	renewFilePath := path.Join(*renewPath, domain+".conf")
 	vt, ok := os.LookupEnv("CERTBOT_VALIDATION")
 	if !ok {
 		fmt.Println("[error] Environment variable CERTBOT_VALIDATION not set")
 		return
 	}
-
-	// Get command-line flags
-	cleanup := flag.Bool("cleanup", false, "Sets cleanup mode (to be used in --manual-cleanup-hook)")
-	verbose := flag.Bool("verbose", false, "Enables verbose output")
-	flag.Parse()
+	cfAPIEmail, ok := os.LookupEnv("CF_API_EMAIL")
+	if !ok && *verbose {
+		fmt.Println("[warning] Environment variable CF_API_EMAIL not set, now depending on renew config")
+	}
+	cfAPIKey, ok := os.LookupEnv("CF_API_KEY")
+	if !ok && *verbose {
+		fmt.Println("[warning] Environment variable CF_API_KEY not set, now depending on renew config")
+	}
+	if cfAPIEmail == "" || cfAPIKey == "" {
+		file, err := ini.Load(renewFilePath)
+		if err != nil {
+			fmt.Printf("[error] Failed to load file \"%s\"\n%v\n", renewFilePath, err)
+			return
+		}
+		section := file.Section("go-certbot-cloudflare")
+		if section == nil {
+			fmt.Printf("[error] Could not find section \"go-certbot-cloudflare\" in file \"%s\"\n", renewFilePath)
+			return
+		}
+		if cfAPIEmail == "" {
+			keyAPIEmail := section.Key("cf_api_email")
+			if keyAPIEmail == nil {
+				fmt.Printf("[error] Could not find key \"cf_api_email\" under section \"go-certbot-cloudflare\" in file \"%s\"\n", renewFilePath)
+				return
+			}
+			cfAPIEmail = keyAPIEmail.String()
+		}
+		if cfAPIKey == "" {
+			keyAPIKey := section.Key("cf_api_key")
+			if keyAPIKey == nil {
+				fmt.Printf("[error] Could not find key \"cf_api_key\" under section \"go-certbot-cloudflare\" in file \"%s\"\n", renewFilePath)
+				return
+			}
+			cfAPIKey = keyAPIKey.String()
+		}
+	}
+	if cfAPIEmail == "" || cfAPIKey == "" {
+		fmt.Println("[error] Cloudflare email or API key is empty")
+		return
+	}
 
 	// Get zone information from Cloudflare API
 	zonesRes := &cfListZonesResponse{}
@@ -90,7 +126,12 @@ func main() {
 		return
 	}
 
-	subdomain := chRecName + "." + zoneDomain
+	var subdomain string
+	if len(domain) > 2 && domain[:2] == "*." {
+		subdomain = chRecName + "." + domain[2:]
+	} else {
+		subdomain = chRecName + "." + domain
+	}
 
 	if *cleanup { // Cleanup mode
 		// Get _acme-challenge TXT records from Cloudflare API
@@ -141,6 +182,33 @@ func main() {
 				for i := range deleteRes.Errors {
 					fmt.Println(deleteRes.Errors[i])
 				}
+				return
+			}
+		}
+
+		// Save Cloudflare credentials to Let's Encrypt renew config
+		if *saveRenewCreds {
+			file, err := ini.Load(renewFilePath)
+			if err != nil {
+				fmt.Printf("[error] Failed to load file \"%s\"\n%v\n", renewFilePath, err)
+				return
+			}
+			file.DeleteSection("go-certbot-cloudflare")
+			section, err := file.NewSection("go-certbot-cloudflare")
+			if err != nil {
+				fmt.Println("[error] Failed to create section \"go-certbot-cloudflare\"")
+				return
+			}
+			if _, err = section.NewKey("cf_api_email", cfAPIEmail); err != nil {
+				fmt.Println("[error] Failed to create key \"cf_api_email\" in section \"go-certbot-cloudflare\"")
+				return
+			}
+			if _, err = section.NewKey("cf_api_key", cfAPIKey); err != nil {
+				fmt.Println("[error] Failed to create key \"cf_api_key\" in section \"go-certbot-cloudflare\"")
+				return
+			}
+			if err = file.SaveTo(renewFilePath); err != nil {
+				fmt.Printf("[error] Failed to save file \"%s\"\n", renewFilePath)
 				return
 			}
 		}
