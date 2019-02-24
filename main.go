@@ -36,7 +36,6 @@ func main() {
 		fmt.Println("[error] Environment variable CERTBOT_DOMAIN not set")
 		return
 	}
-	renewFilePath := path.Join(*renewPath, domain+".conf")
 	vt, ok := os.LookupEnv("CERTBOT_VALIDATION")
 	if !ok {
 		fmt.Println("[error] Environment variable CERTBOT_VALIDATION not set")
@@ -50,6 +49,25 @@ func main() {
 	if !ok && *verbose {
 		fmt.Println("[warning] Environment variable CF_API_KEY not set, now depending on renew config")
 	}
+
+	// Get renewal file path
+	renewDomain := domain
+	var renewFilePath string
+	for {
+		renewFilePath = path.Join(*renewPath, renewDomain+".conf")
+		if _, err := os.Stat(renewFilePath); err == nil {
+			break
+		}
+		tldPos := strings.LastIndexByte(renewDomain, '.')
+		sldPos := strings.IndexByte(renewDomain, '.')
+		if sldPos == tldPos || sldPos == -1 {
+			fmt.Println("[error] Certbot renewal file not found")
+			return
+		}
+		renewDomain = renewDomain[sldPos+1:]
+	}
+
+	// Load API email and/or key from renewal file
 	if cfAPIEmail == "" || cfAPIKey == "" {
 		file, err := ini.Load(renewFilePath)
 		if err != nil {
