@@ -22,6 +22,7 @@ func main() {
 	cleanup := flag.Bool("cleanup", false, "Sets cleanup mode (to be used in --manual-cleanup-hook)")
 	verbose := flag.Bool("verbose", false, "Enables verbose output")
 	renewPath := flag.String("renew-path", "/etc/letsencrypt/renewal/", "Let's Encrypt renew folder path")
+	useRenewCreds := flag.Bool("use-renew-creds", true, "Try to read Cloudflare credentials from Let's Encrypt renew config?")
 	saveRenewCreds := flag.Bool("save-renew-creds", false, "Save Cloudflare credentials to Let's Encrypt renew config?")
 	onlySaveRenewCreds := flag.Bool("only-save-renew-creds", false, "Do nothing other than save Cloudflare credentials to Let's Encrypt renew config?")
 	flag.Parse()
@@ -53,22 +54,24 @@ func main() {
 	// Get renewal file path
 	renewDomain := domain
 	var renewFilePath string
-	for {
-		renewFilePath = path.Join(*renewPath, renewDomain+".conf")
-		if _, err := os.Stat(renewFilePath); err == nil {
-			break
+	if *saveRenewCreds || (*useRenewCreds && (cfAPIEmail == "" || cfAPIKey == "")) {
+		for {
+			renewFilePath = path.Join(*renewPath, renewDomain+".conf")
+			if _, err := os.Stat(renewFilePath); err == nil {
+				break
+			}
+			tldPos := strings.LastIndexByte(renewDomain, '.')
+			sldPos := strings.IndexByte(renewDomain, '.')
+			if sldPos == tldPos || sldPos == -1 {
+				fmt.Println("[error] Certbot renewal file not found")
+				return
+			}
+			renewDomain = renewDomain[sldPos+1:]
 		}
-		tldPos := strings.LastIndexByte(renewDomain, '.')
-		sldPos := strings.IndexByte(renewDomain, '.')
-		if sldPos == tldPos || sldPos == -1 {
-			fmt.Println("[error] Certbot renewal file not found")
-			return
-		}
-		renewDomain = renewDomain[sldPos+1:]
 	}
 
 	// Load API email and/or key from renewal file
-	if cfAPIEmail == "" || cfAPIKey == "" {
+	if *useRenewCreds && (cfAPIEmail == "" || cfAPIKey == "") {
 		file, err := ini.Load(renewFilePath)
 		if err != nil {
 			fmt.Printf("[error] Failed to load file \"%s\"\n%v\n", renewFilePath, err)
