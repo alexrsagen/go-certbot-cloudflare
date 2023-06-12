@@ -111,7 +111,7 @@ type cfCreateRecordResponse struct {
 	Result  cfResponseRecord  `json:"result"`
 }
 
-func cfGet(apiEmail, apiKey, urlExt string, v url.Values) (*http.Response, error) {
+func cfGet(apiAccessToken, apiEmail, apiKey, urlExt string, v url.Values) (*http.Response, error) {
 	base, err := url.Parse(cfAPIBase)
 	if err != nil {
 		return nil, err
@@ -128,12 +128,16 @@ func cfGet(apiEmail, apiKey, urlExt string, v url.Values) (*http.Response, error
 		req.URL.RawQuery = v.Encode()
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Auth-Email", apiEmail)
-	req.Header.Set("X-Auth-Key", apiKey)
+	if apiAccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+apiAccessToken)
+	} else {
+		req.Header.Set("X-Auth-Email", apiEmail)
+		req.Header.Set("X-Auth-Key", apiKey)
+	}
 	return http.DefaultClient.Do(req)
 }
 
-func cfDelete(apiEmail, apiKey, urlExt string, v url.Values) (*http.Response, error) {
+func cfDelete(apiAccessToken, apiEmail, apiKey, urlExt string, v url.Values) (*http.Response, error) {
 	base, err := url.Parse(cfAPIBase)
 	if err != nil {
 		return nil, err
@@ -150,12 +154,16 @@ func cfDelete(apiEmail, apiKey, urlExt string, v url.Values) (*http.Response, er
 		req.URL.RawQuery = v.Encode()
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Auth-Email", apiEmail)
-	req.Header.Set("X-Auth-Key", apiKey)
+	if apiAccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+apiAccessToken)
+	} else {
+		req.Header.Set("X-Auth-Email", apiEmail)
+		req.Header.Set("X-Auth-Key", apiKey)
+	}
 	return http.DefaultClient.Do(req)
 }
 
-func cfPostJSON(apiEmail, apiKey, urlExt string, v interface{}) (*http.Response, error) {
+func cfPostJSON(apiAccessToken, apiEmail, apiKey, urlExt string, v interface{}) (*http.Response, error) {
 	base, err := url.Parse(cfAPIBase)
 	if err != nil {
 		return nil, err
@@ -173,7 +181,11 @@ func cfPostJSON(apiEmail, apiKey, urlExt string, v interface{}) (*http.Response,
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Auth-Email", apiEmail)
-	req.Header.Set("X-Auth-Key", apiKey)
+	if apiAccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+apiAccessToken)
+	} else {
+		req.Header.Set("X-Auth-Email", apiEmail)
+		req.Header.Set("X-Auth-Key", apiKey)
+	}
 	return http.DefaultClient.Do(req)
 }

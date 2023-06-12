@@ -42,13 +42,17 @@ func main() {
 		fmt.Println("[error] Environment variable CERTBOT_VALIDATION not set")
 		return
 	}
+	cfAPIAccessToken, ok := os.LookupEnv("CF_API_ACCESS_TOKEN")
+	if !ok && *verbose {
+		fmt.Println("[warning] Environment variable CF_API_ACCESS_TOKEN not set (this is OK if CF_API_EMAIL / CF_API_KEY is set or renew config contains auth)")
+	}
 	cfAPIEmail, ok := os.LookupEnv("CF_API_EMAIL")
 	if !ok && *verbose {
-		fmt.Println("[warning] Environment variable CF_API_EMAIL not set, now depending on renew config")
+		fmt.Println("[warning] Environment variable CF_API_EMAIL not set (this is OK if CF_API_ACCESS_TOKEN is set or renew config contains auth)")
 	}
 	cfAPIKey, ok := os.LookupEnv("CF_API_KEY")
 	if !ok && *verbose {
-		fmt.Println("[warning] Environment variable CF_API_KEY not set, now depending on renew config")
+		fmt.Println("[warning] Environment variable CF_API_KEY not set (this is OK if CF_API_ACCESS_TOKEN is set or renew config contains auth)")
 	}
 
 	// Get renewal file path
@@ -82,24 +86,32 @@ func main() {
 			fmt.Printf("[error] Could not find section \"go-certbot-cloudflare\" in file \"%s\"\n", renewFilePath)
 			return
 		}
+		if cfAPIAccessToken == "" {
+			keyAPIAccessToken := section.Key("cf_api_access_token")
+			if keyAPIAccessToken != nil {
+				cfAPIAccessToken = keyAPIAccessToken.String()
+			} else if *verbose {
+				fmt.Printf("[warning] Could not find key \"cf_api_access_token\" under section \"go-certbot-cloudflare\" in file \"%s\" (this is OK if cf_api_email / cf_api_key is set or environment variables provide auth)\n", renewFilePath)
+			}
+		}
 		if cfAPIEmail == "" {
 			keyAPIEmail := section.Key("cf_api_email")
-			if keyAPIEmail == nil {
-				fmt.Printf("[error] Could not find key \"cf_api_email\" under section \"go-certbot-cloudflare\" in file \"%s\"\n", renewFilePath)
-				return
+			if keyAPIEmail != nil {
+				cfAPIEmail = keyAPIEmail.String()
+			} else if *verbose {
+				fmt.Printf("[warning] Could not find key \"cf_api_email\" under section \"go-certbot-cloudflare\" in file \"%s\" (this is OK if cf_api_access_token is set or environment variables provide auth)\n", renewFilePath)
 			}
-			cfAPIEmail = keyAPIEmail.String()
 		}
 		if cfAPIKey == "" {
 			keyAPIKey := section.Key("cf_api_key")
-			if keyAPIKey == nil {
-				fmt.Printf("[error] Could not find key \"cf_api_key\" under section \"go-certbot-cloudflare\" in file \"%s\"\n", renewFilePath)
-				return
+			if keyAPIKey != nil {
+				cfAPIKey = keyAPIKey.String()
+			} else if *verbose {
+				fmt.Printf("[warning] Could not find key \"cf_api_key\" under section \"go-certbot-cloudflare\" in file \"%s\" (this is OK if cf_api_access_token is set or environment variables provide auth)\n", renewFilePath)
 			}
-			cfAPIKey = keyAPIKey.String()
 		}
 	}
-	if cfAPIEmail == "" || cfAPIKey == "" {
+	if cfAPIAccessToken == "" && (cfAPIEmail == "" || cfAPIKey == "") {
 		fmt.Println("[error] Cloudflare email or API key is empty")
 		return
 	}
@@ -111,7 +123,7 @@ func main() {
 		if *verbose {
 			fmt.Printf("[info] Looking up zone %s in Cloudflare account\n", zoneDomain)
 		}
-		httpRes, err := cfGet(cfAPIEmail, cfAPIKey, "zones", url.Values{
+		httpRes, err := cfGet(cfAPIAccessToken, cfAPIEmail, cfAPIKey, "zones", url.Values{
 			"name":     []string{zoneDomain},
 			"status":   []string{"active"},
 			"page":     []string{"1"},
@@ -167,7 +179,7 @@ func main() {
 		if *verbose {
 			fmt.Println("[info] Looking up DNS ACME challenge records in Cloudflare zone")
 		}
-		httpRes, err := cfGet(cfAPIEmail, cfAPIKey, "zones/"+zonesRes.Result[0].ID+"/dns_records", url.Values{
+		httpRes, err := cfGet(cfAPIAccessToken, cfAPIEmail, cfAPIKey, "zones/"+zonesRes.Result[0].ID+"/dns_records", url.Values{
 			"type":     []string{"TXT"},
 			"name":     []string{subdomain},
 			"page":     []string{"1"},
@@ -195,7 +207,7 @@ func main() {
 			if *verbose {
 				fmt.Printf("[info] Deleting challenge record TXT %s: \"%s\"\n", recordsRes.Result[i].Name, recordsRes.Result[i].Content)
 			}
-			httpRes, err := cfDelete(cfAPIEmail, cfAPIKey, "zones/"+zonesRes.Result[0].ID+"/dns_records/"+recordsRes.Result[i].ID, nil)
+			httpRes, err := cfDelete(cfAPIAccessToken, cfAPIEmail, cfAPIKey, "zones/"+zonesRes.Result[0].ID+"/dns_records/"+recordsRes.Result[i].ID, nil)
 			if err != nil {
 				fmt.Printf("[error] Cloudflare request failed\n%v\n", err)
 				return
@@ -261,7 +273,7 @@ func main() {
 			fmt.Println("[info] Challenge record not found on domain")
 			fmt.Printf("[info] Creating TXT record %s with content \"%s\"\n", subdomain, vt)
 		}
-		httpRes, err := cfPostJSON(cfAPIEmail, cfAPIKey, "zones/"+zonesRes.Result[0].ID+"/dns_records", &cfCreateDNSRecord{
+		httpRes, err := cfPostJSON(cfAPIAccessToken, cfAPIEmail, cfAPIKey, "zones/"+zonesRes.Result[0].ID+"/dns_records", &cfCreateDNSRecord{
 			Type:    "TXT",
 			Name:    subdomain,
 			Content: vt,
