@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -10,7 +11,29 @@ import (
 
 var errInconsistent = errors.New("[error] Inconsistent record count from CF_NS1 and CF_NS2")
 
-func lookupCompareTXT(rs1 net.Resolver, rs2 net.Resolver, name string) ([]string, error) {
+func resolver(address string) net.Resolver {
+	return net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (conn net.Conn, err error) {
+			d := net.Dialer{}
+			var addr net.Addr
+			if network == "tcp" {
+				addr, err = net.ResolveTCPAddr(network, address)
+			} else if network == "udp" {
+				addr, err = net.ResolveUDPAddr(network, address)
+			} else {
+				err = fmt.Errorf("unknown DNS resolver network type %q", network)
+			}
+			if err != nil {
+				return
+			}
+			conn, err = d.DialContext(ctx, network, addr.String())
+			return
+		},
+	}
+}
+
+func lookupCompareTXT(rs1, rs2 net.Resolver, name string) ([]string, error) {
 	wg := &sync.WaitGroup{}
 
 	var res1, res2 []string

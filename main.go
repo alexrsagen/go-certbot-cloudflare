@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -227,33 +226,8 @@ func main() {
 			}
 		}
 	} else if !*onlySaveRenewCreds { // Auth/normal mode
-		// Resolve IP of first nameserver
-		addr1, err := net.ResolveUDPAddr("udp", zonesRes.Result[0].Nameservers[0]+":53")
-		if err != nil {
-			fmt.Printf("[error] Could not resolve nameserver in CF_NS1\n%v\n", err)
-			return
-		}
-		rs1 := net.Resolver{
-			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				d := net.Dialer{}
-				return d.DialContext(ctx, "udp", addr1.String())
-			},
-		}
-
-		// Resolve IP of second nameserver
-		addr2, err := net.ResolveUDPAddr("udp", zonesRes.Result[0].Nameservers[1]+":53")
-		if err != nil {
-			fmt.Printf("[error] Could not resolve nameserver in CF_NS2\n%v\n", err)
-			return
-		}
-		rs2 := net.Resolver{
-			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				d := net.Dialer{}
-				return d.DialContext(ctx, "udp", addr2.String())
-			},
-		}
+		rs1 := resolver(net.JoinHostPort(zonesRes.Result[0].Nameservers[0], "53"))
+		rs2 := resolver(net.JoinHostPort(zonesRes.Result[0].Nameservers[1], "53"))
 
 		// Perform initial lookup of _acme-challenge TXT records using the Cloudflare DNS servers
 		if *verbose {
@@ -313,17 +287,18 @@ func main() {
 				if *verbose {
 					fmt.Println(err.Error())
 				}
-				time.Sleep(1 * time.Second)
+				time.Sleep(time.Second)
 				continue
 			} else if err != nil && !strings.Contains(err.Error(), "no such host") {
-				fmt.Printf("[error] Failed lookup TXT %s\n%v\n", subdomain, err)
-				return
+				fmt.Printf("[warning] Failed lookup TXT %s: %v\n", subdomain, err)
+				time.Sleep(time.Second)
+				continue
 			}
 			if dnsRes == nil || len(dnsRes) == 0 || !strSliceLookup(dnsRes, vt) {
 				if *verbose {
 					fmt.Printf("[info] Challenge record \"%s\" missing from domain, retrying...\n", vt)
 				}
-				time.Sleep(1 * time.Second)
+				time.Sleep(time.Second)
 				continue
 			}
 			break
